@@ -260,128 +260,103 @@ app.get('/callback', async (req, res) => {
         error: error || 'none'
     });
 
-    // Clear the state cookie
-    res.clearCookie('spotify_auth_state');
-
-    // Handle Spotify errors
     if (error) {
-        console.error('Spotify auth error:', error);
-        res.redirect(`/?error=spotify_${error}`);
+        console.error('Authorization error:', error);
+        res.redirect('/?error=' + encodeURIComponent(error));
         return;
     }
 
-    if (!state || !storedState || state !== storedState) {
-        console.error('State mismatch:', { state, storedState });
-        res.redirect('/?error=state_mismatch');
+    if (!code) {
+        console.error('No code provided');
+        res.redirect('/?error=' + encodeURIComponent('No authorization code provided'));
         return;
     }
+
+    if (state !== storedState) {
+        console.error('State mismatch:', { state, storedState });
+        res.redirect('/?error=' + encodeURIComponent('State verification failed'));
+        return;
+    }
+
+    // Log environment variables (without exposing sensitive data)
+    console.log('Environment check:', {
+        hasClientId: !!CLIENT_ID,
+        hasClientSecret: !!CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        artistId: ARTIST_ID,
+        playlistId: PLAYLIST_ID
+    });
 
     try {
-        console.log('Environment check:', {
-            hasClientId: !!CLIENT_ID,
-            hasClientSecret: !!CLIENT_SECRET,
-            redirectUri: REDIRECT_URI,
-            artistId: ARTIST_ID,
-            playlistId: PLAYLIST_ID
-        });
-
         console.log('Attempting token exchange with code:', code.substring(0, 5) + '...');
         
         // Exchange code for access token
-        const tokenResponse = await axios.post(SPOTIFY_TOKEN_URL, 
-            new URLSearchParams({
+        const tokenResponse = await axios({
+            method: 'post',
+            url: SPOTIFY_TOKEN_URL,
+            params: {
                 code: code,
                 redirect_uri: REDIRECT_URI,
                 grant_type: 'authorization_code'
-            }), {
-                headers: {
-                    'Authorization': 'Basic ' + Buffer.from(CLIENT_ID + ':' + CLIENT_SECRET).toString('base64'),
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                }
+            },
+            headers: {
+                'Authorization': 'Basic ' + Buffer.from(CLIENT_ID + ':' + CLIENT_SECRET).toString('base64'),
+                'Content-Type': 'application/x-www-form-urlencoded'
             }
-        );
+        });
 
         console.log('Token exchange successful');
         const accessToken = tokenResponse.data.access_token;
 
-        // First, verify the artist exists and get artist info
-        let artistInfo;
-        try {
-            console.log('Starting artist verification...');
-            console.log('Artist ID to verify:', ARTIST_ID);
-            console.log('Making request to:', `${SPOTIFY_API_URL}/artists/${ARTIST_ID}`);
-            
-            const artistResponse = await axios.get(`${SPOTIFY_API_URL}/artists/${ARTIST_ID}`, {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`
-                }
-            });
-            
-            artistInfo = artistResponse.data;
-            console.log('Artist verification successful:', {
-                name: artistInfo.name,
-                id: artistInfo.id,
-                uri: artistInfo.uri
-            });
-        } catch (artistError) {
-            console.error('Artist verification failed:', {
-                status: artistError.response?.status,
-                statusText: artistError.response?.statusText,
-                data: artistError.response?.data,
-                message: artistError.message,
-                artistId: ARTIST_ID,
-                url: artistError.config?.url
-            });
+        // Start artist verification
+        console.log('Starting artist verification...');
+        console.log('Artist ID to verify:', ARTIST_ID);
+        
+        console.log('Making request to:', `${SPOTIFY_API_URL}/artists/${ARTIST_ID}`);
+        const artistInfo = await axios.get(`${SPOTIFY_API_URL}/artists/${ARTIST_ID}`, {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`
+            }
+        });
+
+        if (!artistInfo.data) {
             throw new Error(`Invalid artist ID (${ARTIST_ID}). Please check the ARTIST_ID in your environment variables.`);
         }
 
-        // Check if user follows both artist and playlist
+        console.log('Artist verification successful:', {
+            name: artistInfo.data.name,
+            id: artistInfo.data.id,
+            uri: artistInfo.data.uri
+        });
+
+        // Check if user follows the artist
         console.log('Checking follow status...');
-        const [artistFollow, playlistFollow] = await Promise.all([
-            // Check artist follow
-            axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
-                params: {
-                    type: 'artist',
-                    ids: ARTIST_ID
-                },
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`
-                }
-            }),
-            // Check playlist follow
-            axios.get(`${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}/followers/contains`, {
-                params: {
-                    ids: artistInfo.id
-                },
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`
-                }
-            })
-        ]);
+        const followResponse = await axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
+            params: {
+                type: 'artist',
+                ids: ARTIST_ID
+            },
+            headers: {
+                'Authorization': `Bearer ${accessToken}`
+            }
+        });
 
-        const isFollowingArtist = artistFollow.data[0];
-        const isFollowingPlaylist = playlistFollow.data[0];
-        console.log('Follow status:', { artist: isFollowingArtist, playlist: isFollowingPlaylist });
+        const isFollowing = followResponse.data[0];
+        console.log('Follow status:', isFollowing);
 
-        if (isFollowingArtist && isFollowingPlaylist) {
-            console.log('User follows both, redirecting to:', SUCCESS_REDIRECT_URL);
+        if (isFollowing) {
+            console.log('User follows artist, redirecting to:', SUCCESS_REDIRECT_URL);
             res.redirect(SUCCESS_REDIRECT_URL);
         } else {
             // Get artist image URL and playlist info
-            const artistImage = artistInfo.images[0]?.url || '';
-            const playlistResponse = await axios.get(`${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}`, {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`
-                }
-            });
-            const playlistName = playlistResponse.data.name;
+            const artistImage = artistInfo.data.images[0]?.url || '';
             
             // Show follow page with improved design
             res.send(`
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Follow ${artistInfo.name} on Spotify</title>
+                    <title>Follow ${artistInfo.data.name} on Spotify</title>
                     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
                     <style>
                         body {
@@ -460,9 +435,9 @@ app.get('/callback', async (req, res) => {
                 </head>
                 <body>
                     <div class="container">
-                        <img src="${artistImage}" alt="${artistInfo.name}" class="artist-image">
+                        <img src="${artistImage}" alt="${artistInfo.data.name}" class="artist-image">
                         <h1>ONE MORE STEP...</h1>
-                        <p>Follow ${artistInfo.name} and their playlist "${playlistName}" on Spotify to access your free download</p>
+                        <p>Follow ${artistInfo.data.name} and their playlist on Spotify to access your free download</p>
                         <button onclick="followBoth()" class="button">Follow Now</button>
                         <div id="status"></div>
                         <div id="error"></div>
@@ -505,33 +480,18 @@ app.get('/callback', async (req, res) => {
         }
 
     } catch (error) {
-        console.error('Auth error details:', {
+        console.error('Callback error:', {
             status: error.response?.status,
-            statusText: error.response?.statusText,
             data: error.response?.data,
-            message: error.message,
-            config: {
-                url: error.config?.url,
-                method: error.config?.method,
-                headers: {
-                    ...error.config?.headers,
-                    Authorization: error.config?.headers?.Authorization ? '[REDACTED]' : undefined
-                }
-            }
+            message: error.message
         });
 
-        let errorMessage = 'Authentication failed. ';
-        if (error.message.includes('Invalid artist ID')) {
-            errorMessage = error.message;
-        } else if (error.response?.status === 403) {
-            errorMessage += 'Please make sure you are using the correct Spotify account and try again.';
-        } else if (error.response?.data?.error_description) {
-            errorMessage += error.response.data.error_description;
-        } else {
-            errorMessage += error.message;
-        }
+        const errorMessage = error.response?.data?.error_description || 
+                           error.response?.data?.error?.message || 
+                           error.message || 
+                           'An unknown error occurred';
 
-        res.redirect('/?error=auth_error&details=' + encodeURIComponent(errorMessage));
+        res.redirect('/?error=' + encodeURIComponent(errorMessage));
     }
 });
 
