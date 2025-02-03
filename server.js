@@ -318,7 +318,7 @@ app.get('/callback', async (req, res) => {
                 <html>
                 <head>
                     <title>Follow ${artistInfo.name} on Spotify</title>
-                    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+                    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
                     <style>
                         body {
                             margin: 0;
@@ -329,39 +329,44 @@ app.get('/callback', async (req, res) => {
                             align-items: center;
                             justify-content: center;
                             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-                            background: linear-gradient(135deg, #1DB954 0%, #191414 100%);
+                            background: #000000;
                             color: white;
                             text-align: center;
                         }
                         .container {
                             padding: 2rem;
-                            max-width: 600px;
+                            max-width: 800px;
                             width: 90%;
                         }
                         h1 {
                             font-family: 'Poppins', sans-serif;
-                            font-weight: 600;
-                            font-size: 2.5rem;
+                            font-weight: 800;
+                            font-size: 3rem;
                             margin-bottom: 1.5rem;
                             color: white;
+                            text-transform: uppercase;
+                            letter-spacing: 2px;
                         }
                         p {
-                            font-size: 1.2rem;
-                            margin-bottom: 2rem;
+                            font-size: 1.4rem;
+                            margin-bottom: 2.5rem;
                             color: rgba(255, 255, 255, 0.9);
+                            font-family: 'Poppins', sans-serif;
+                            font-weight: 400;
+                            line-height: 1.6;
                         }
                         .artist-image {
-                            width: 250px;
-                            height: 250px;
-                            margin-bottom: 2rem;
+                            width: 500px;
+                            height: 500px;
+                            margin-bottom: 2.5rem;
                             box-shadow: 0 8px 24px rgba(0,0,0,0.2);
                         }
                         .button {
                             background: #1DB954;
                             color: white;
                             border: none;
-                            padding: 1rem 2rem;
-                            font-size: 1.1rem;
+                            padding: 1.2rem 3rem;
+                            font-size: 1.2rem;
                             font-weight: 600;
                             cursor: pointer;
                             text-decoration: none;
@@ -369,6 +374,7 @@ app.get('/callback', async (req, res) => {
                             transition: transform 0.2s, background-color 0.2s;
                             text-transform: uppercase;
                             letter-spacing: 1px;
+                            font-family: 'Poppins', sans-serif;
                         }
                         .button:hover {
                             background: #1ed760;
@@ -378,19 +384,21 @@ app.get('/callback', async (req, res) => {
                             margin-top: 1.5rem;
                             font-weight: 500;
                             color: white;
+                            font-family: 'Poppins', sans-serif;
                         }
                         #error {
                             margin-top: 1rem;
                             color: #ff4444;
                             font-weight: 500;
+                            font-family: 'Poppins', sans-serif;
                         }
                     </style>
                 </head>
                 <body>
                     <div class="container">
                         <img src="${artistImage}" alt="${artistInfo.name}" class="artist-image">
-                        <h1>Follow ${artistInfo.name}</h1>
-                        <p>Follow to access exclusive content</p>
+                        <h1>ONE MORE STEP...</h1>
+                        <p>Follow ${artistInfo.name} on Spotify to access your free download</p>
                         <button onclick="followArtist()" class="button">Follow Artist</button>
                         <div id="status"></div>
                         <div id="error"></div>
