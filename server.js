@@ -105,8 +105,8 @@ app.get('/login', (req, res) => {
     const state = generateRandomString(16);
     res.cookie('spotify_auth_state', state);
 
-    // Update scopes to include playlist-read-collaborative and playlist-read-private
-    const scope = 'user-follow-read user-follow-modify playlist-read-private playlist-read-collaborative';
+    // Update scopes to include user-library-modify for saving playlists
+    const scope = 'user-follow-read user-follow-modify user-library-modify';
     res.redirect(SPOTIFY_AUTH_URL +
         '?response_type=code' +
         '&client_id=' + CLIENT_ID +
@@ -136,26 +136,8 @@ app.get('/follow', async (req, res) => {
         });
         console.log('User authenticated:', userResponse.data.id);
 
-        // Verify we can access the playlist
-        console.log('Verifying playlist access...');
-        try {
-            const playlistResponse = await axios.get(`${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}`, {
-                headers: {
-                    'Authorization': `Bearer ${access_token}`
-                }
-            });
-            console.log('Playlist accessible:', playlistResponse.data.name);
-        } catch (playlistError) {
-            console.error('Playlist access error:', {
-                status: playlistError.response?.status,
-                data: playlistError.response?.data,
-                message: playlistError.message
-            });
-            throw new Error('Unable to access playlist. Please check the playlist ID and permissions.');
-        }
-
         // Follow both artist and playlist
-        console.log('Attempting to follow artist and playlist...');
+        console.log('Attempting to follow artist and save playlist...');
         
         // Follow artist
         try {
@@ -181,29 +163,32 @@ app.get('/follow', async (req, res) => {
             throw new Error('Failed to follow artist. ' + (artistError.response?.data?.error?.message || artistError.message));
         }
 
-        // Follow playlist
+        // Save playlist to library
         try {
             await axios({
                 method: 'put',
-                url: `${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}/followers`,
+                url: `${SPOTIFY_API_URL}/me/tracks`,
+                params: {
+                    ids: PLAYLIST_ID
+                },
                 headers: {
                     'Authorization': `Bearer ${access_token}`,
                     'Content-Type': 'application/json'
                 }
             });
-            console.log('Successfully followed playlist');
+            console.log('Successfully saved playlist');
         } catch (playlistError) {
-            console.error('Playlist follow error:', {
+            console.error('Playlist save error:', {
                 status: playlistError.response?.status,
                 data: playlistError.response?.data,
                 message: playlistError.message
             });
-            throw new Error('Failed to follow playlist. ' + (playlistError.response?.data?.error?.message || playlistError.message));
+            throw new Error('Failed to save playlist. ' + (playlistError.response?.data?.error?.message || playlistError.message));
         }
 
         // Verify both follows
         console.log('Verifying follows...');
-        const [artistFollow, playlistFollow] = await Promise.all([
+        const [artistFollow, playlistSaved] = await Promise.all([
             // Check artist follow
             axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
                 params: {
@@ -214,10 +199,10 @@ app.get('/follow', async (req, res) => {
                     'Authorization': `Bearer ${access_token}`
                 }
             }),
-            // Check playlist follow
-            axios.get(`${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}/followers/contains`, {
+            // Check if playlist is saved
+            axios.get(`${SPOTIFY_API_URL}/me/tracks/contains`, {
                 params: {
-                    ids: userResponse.data.id
+                    ids: PLAYLIST_ID
                 },
                 headers: {
                     'Authorization': `Bearer ${access_token}`
@@ -226,27 +211,27 @@ app.get('/follow', async (req, res) => {
         ]);
 
         const isFollowingArtist = artistFollow.data[0];
-        const isFollowingPlaylist = playlistFollow.data[0];
-        console.log('Follow verification status:', {
+        const isPlaylistSaved = playlistSaved.data[0];
+        console.log('Verification status:', {
             artist: isFollowingArtist,
-            playlist: isFollowingPlaylist
+            playlist: isPlaylistSaved
         });
 
-        if (isFollowingArtist && isFollowingPlaylist) {
-            console.log('Both follows verified successfully');
+        if (isFollowingArtist && isPlaylistSaved) {
+            console.log('Both actions verified successfully');
             res.json({ success: true });
         } else {
-            console.error('Follow verification failed:', {
+            console.error('Verification failed:', {
                 artistFollow: isFollowingArtist,
-                playlistFollow: isFollowingPlaylist
+                playlistSaved: isPlaylistSaved
             });
             res.status(500).json({ 
                 error: 'Failed to verify follows',
-                details: 'The follow requests succeeded but verification failed. Please try again.'
+                details: 'The requests succeeded but verification failed. Please try again.'
             });
         }
     } catch (error) {
-        console.error('Follow error:', {
+        console.error('Error:', {
             endpoint: error.config?.url,
             status: error.response?.status,
             data: error.response?.data,
@@ -254,7 +239,7 @@ app.get('/follow', async (req, res) => {
             stack: error.stack
         });
 
-        let errorMessage = 'Failed to follow. ';
+        let errorMessage = 'Failed to complete actions. ';
         if (error.response?.status === 401) {
             errorMessage += 'Your session has expired. Please log in again.';
         } else if (error.response?.status === 403) {
@@ -266,7 +251,7 @@ app.get('/follow', async (req, res) => {
         }
 
         res.status(error.response?.status || 500).json({ 
-            error: 'Failed to follow',
+            error: 'Action failed',
             details: errorMessage
         });
     }
