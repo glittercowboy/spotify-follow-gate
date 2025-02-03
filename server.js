@@ -28,14 +28,62 @@ const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
 
 app.get('/', (req, res) => {
+    const error = req.query.error;
+    const errorMessage = error === 'not_following' ? 
+        'Please follow the artist to access the download.' : '';
+    
     res.send(`
-        <h1>Spotify Follow Gate</h1>
-        <a href="/login">Login with Spotify</a>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Spotify Follow Gate</title>
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    max-width: 600px;
+                    margin: 40px auto;
+                    padding: 20px;
+                    text-align: center;
+                    background: #121212;
+                    color: white;
+                }
+                h1 {
+                    color: #1DB954;
+                    margin-bottom: 30px;
+                }
+                .login-button {
+                    display: inline-block;
+                    background: #1DB954;
+                    color: white;
+                    padding: 15px 30px;
+                    border-radius: 25px;
+                    text-decoration: none;
+                    font-weight: bold;
+                    transition: background 0.3s;
+                }
+                .login-button:hover {
+                    background: #1ed760;
+                }
+                .error {
+                    color: #ff4444;
+                    margin: 20px 0;
+                    padding: 10px;
+                    border-radius: 5px;
+                    background: rgba(255,68,68,0.1);
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Spotify Follow Gate</h1>
+            ${errorMessage ? `<div class="error">${errorMessage}</div>` : ''}
+            <a href="/login" class="login-button">Login with Spotify</a>
+        </body>
+        </html>
     `);
 });
 
 app.get('/login', (req, res) => {
-    const scope = 'user-follow-read';
+    const scope = 'user-follow-read user-follow-modify';
     const state = Math.random().toString(36).substring(7);
     
     res.cookie('spotify_auth_state', state);
@@ -45,10 +93,38 @@ app.get('/login', (req, res) => {
         client_id: CLIENT_ID,
         scope: scope,
         redirect_uri: REDIRECT_URI,
-        state: state
+        state: state,
+        show_dialog: true // This ensures the user sees the permission screen
     });
 
     res.redirect(`${SPOTIFY_AUTH_URL}?${params.toString()}`);
+});
+
+app.get('/follow', async (req, res) => {
+    const { access_token } = req.query;
+    
+    if (!access_token) {
+        res.status(400).json({ error: 'No access token provided' });
+        return;
+    }
+
+    try {
+        // Follow the artist
+        await axios.put(`${SPOTIFY_API_URL}/me/following`, {
+            ids: [ARTIST_ID],
+            type: 'artist'
+        }, {
+            headers: {
+                'Authorization': `Bearer ${access_token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Follow error:', error.response ? error.response.data : error.message);
+        res.status(500).json({ error: 'Failed to follow artist' });
+    }
 });
 
 app.get('/callback', async (req, res) => {
@@ -57,7 +133,7 @@ app.get('/callback', async (req, res) => {
     const storedState = req.cookies['spotify_auth_state'];
 
     if (state === null || state !== storedState) {
-        res.redirect(FAILURE_REDIRECT_URL);
+        res.redirect('/?error=state_mismatch');
         return;
     }
 
@@ -92,16 +168,91 @@ app.get('/callback', async (req, res) => {
         const isFollowing = followResponse.data[0];
 
         if (isFollowing) {
-            // Redirect to GoHighLevel download page
             res.redirect(SUCCESS_REDIRECT_URL);
         } else {
-            // Redirect to GoHighLevel "please follow" page
-            res.redirect(FAILURE_REDIRECT_URL);
+            // Show follow page
+            res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Follow to Continue</title>
+                    <style>
+                        body {
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                            max-width: 600px;
+                            margin: 40px auto;
+                            padding: 20px;
+                            text-align: center;
+                            background: #121212;
+                            color: white;
+                        }
+                        h1 {
+                            color: #1DB954;
+                            margin-bottom: 30px;
+                        }
+                        .button {
+                            display: inline-block;
+                            background: #1DB954;
+                            color: white;
+                            padding: 15px 30px;
+                            border-radius: 25px;
+                            text-decoration: none;
+                            font-weight: bold;
+                            transition: background 0.3s;
+                            border: none;
+                            cursor: pointer;
+                            margin: 10px;
+                        }
+                        .button:hover {
+                            background: #1ed760;
+                        }
+                        .message {
+                            margin: 20px 0;
+                            padding: 10px;
+                        }
+                        #status {
+                            margin-top: 20px;
+                            font-weight: bold;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>One More Step!</h1>
+                    <p>To access the download, please follow the artist on Spotify.</p>
+                    <button onclick="followArtist()" class="button">Follow Artist</button>
+                    <a href="/login" class="button">Check Again</a>
+                    <div id="status"></div>
+
+                    <script>
+                    async function followArtist() {
+                        const status = document.getElementById('status');
+                        status.textContent = 'Following artist...';
+                        
+                        try {
+                            const response = await fetch('/follow?access_token=${accessToken}');
+                            const data = await response.json();
+                            
+                            if (data.success) {
+                                status.textContent = 'Successfully followed! Redirecting...';
+                                setTimeout(() => {
+                                    window.location.href = '/login';
+                                }, 1500);
+                            } else {
+                                status.textContent = 'Failed to follow. Please try again.';
+                            }
+                        } catch (error) {
+                            status.textContent = 'An error occurred. Please try again.';
+                        }
+                    }
+                    </script>
+                </body>
+                </html>
+            `);
         }
 
     } catch (error) {
         console.error('Error:', error.response ? error.response.data : error.message);
-        res.redirect(FAILURE_REDIRECT_URL);
+        res.redirect('/?error=auth_error');
     }
 });
 
