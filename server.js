@@ -104,16 +104,20 @@ app.get('/follow', async (req, res) => {
     const { access_token } = req.query;
     
     if (!access_token) {
+        console.error('No access token provided');
         res.status(400).json({ error: 'No access token provided' });
         return;
     }
 
     try {
         // Follow the artist
-        await axios.put(`${SPOTIFY_API_URL}/me/following`, {
-            ids: [ARTIST_ID],
-            type: 'artist'
-        }, {
+        await axios({
+            method: 'put',
+            url: `${SPOTIFY_API_URL}/me/following`,
+            params: {
+                type: 'artist',
+                ids: ARTIST_ID
+            },
             headers: {
                 'Authorization': `Bearer ${access_token}`,
                 'Content-Type': 'application/json'
@@ -122,8 +126,15 @@ app.get('/follow', async (req, res) => {
 
         res.json({ success: true });
     } catch (error) {
-        console.error('Follow error:', error.response ? error.response.data : error.message);
-        res.status(500).json({ error: 'Failed to follow artist' });
+        console.error('Follow error:', {
+            status: error.response?.status,
+            data: error.response?.data,
+            message: error.message
+        });
+        res.status(500).json({ 
+            error: 'Failed to follow artist',
+            details: error.response?.data || error.message 
+        });
     }
 });
 
@@ -238,9 +249,11 @@ app.get('/callback', async (req, res) => {
                                     window.location.href = '/login';
                                 }, 1500);
                             } else {
-                                status.textContent = 'Failed to follow. Please try again.';
+                                console.error('Follow failed:', data);
+                                status.textContent = 'Failed to follow. Please try again. ' + (data.details || '');
                             }
                         } catch (error) {
+                            console.error('Follow error:', error);
                             status.textContent = 'An error occurred. Please try again.';
                         }
                     }
