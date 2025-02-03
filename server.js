@@ -4,7 +4,7 @@ const axios = require('axios');
 const cookieParser = require('cookie-parser');
 
 // Validate required environment variables
-const requiredEnvVars = ['CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'ARTIST_ID'];
+const requiredEnvVars = ['CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'ARTIST_ID', 'SUCCESS_REDIRECT_URL', 'FAILURE_REDIRECT_URL'];
 const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
 
 if (missingEnvVars.length > 0) {
@@ -19,6 +19,8 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const ARTIST_ID = process.env.ARTIST_ID;
+const SUCCESS_REDIRECT_URL = process.env.SUCCESS_REDIRECT_URL;
+const FAILURE_REDIRECT_URL = process.env.FAILURE_REDIRECT_URL;
 
 // Spotify OAuth endpoints
 const SPOTIFY_AUTH_URL = 'https://accounts.spotify.com/authorize';
@@ -55,7 +57,7 @@ app.get('/callback', async (req, res) => {
     const storedState = req.cookies['spotify_auth_state'];
 
     if (state === null || state !== storedState) {
-        res.redirect('/#error=state_mismatch');
+        res.redirect(FAILURE_REDIRECT_URL);
         return;
     }
 
@@ -90,23 +92,16 @@ app.get('/callback', async (req, res) => {
         const isFollowing = followResponse.data[0];
 
         if (isFollowing) {
-            res.send(`
-                <h1>Success!</h1>
-                <p>You are following the artist. Access granted!</p>
-            `);
+            // Redirect to GoHighLevel download page
+            res.redirect(SUCCESS_REDIRECT_URL);
         } else {
-            res.send(`
-                <h1>Access Denied</h1>
-                <p>You need to follow the artist to gain access.</p>
-                <a href="https://open.spotify.com/artist/${ARTIST_ID}" target="_blank">Follow Artist</a>
-                <br><br>
-                <a href="/login">Try Again</a>
-            `);
+            // Redirect to GoHighLevel "please follow" page
+            res.redirect(FAILURE_REDIRECT_URL);
         }
 
     } catch (error) {
         console.error('Error:', error.response ? error.response.data : error.message);
-        res.send('Error occurred during authentication');
+        res.redirect(FAILURE_REDIRECT_URL);
     }
 });
 
