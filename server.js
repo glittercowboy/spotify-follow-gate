@@ -124,7 +124,24 @@ app.get('/follow', async (req, res) => {
     }
 
     try {
+        // First verify we can get user info
+        const userResponse = await axios.get(`${SPOTIFY_API_URL}/me`, {
+            headers: {
+                'Authorization': `Bearer ${access_token}`
+            }
+        });
+        console.log('User authenticated:', userResponse.data.id);
+
+        // Then verify artist exists
+        const artistResponse = await axios.get(`${SPOTIFY_API_URL}/artists/${ARTIST_ID}`, {
+            headers: {
+                'Authorization': `Bearer ${access_token}`
+            }
+        });
+        console.log('Artist found:', artistResponse.data.name);
+
         // Follow the artist
+        console.log('Attempting to follow artist...');
         await axios({
             method: 'put',
             url: `${SPOTIFY_API_URL}/me/following`,
@@ -137,17 +154,51 @@ app.get('/follow', async (req, res) => {
                 'Content-Type': 'application/json'
             }
         });
+        console.log('Successfully followed artist');
 
-        res.json({ success: true });
+        // Verify the follow was successful
+        const verifyFollow = await axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
+            params: {
+                type: 'artist',
+                ids: ARTIST_ID
+            },
+            headers: {
+                'Authorization': `Bearer ${access_token}`
+            }
+        });
+
+        if (verifyFollow.data[0]) {
+            console.log('Follow verified successfully');
+            res.json({ success: true });
+        } else {
+            console.error('Follow appeared to succeed but verification failed');
+            res.status(500).json({ 
+                error: 'Failed to verify follow',
+                details: 'The follow request succeeded but verification failed. Please try again or follow manually.'
+            });
+        }
     } catch (error) {
         console.error('Follow error:', {
+            endpoint: error.config?.url,
             status: error.response?.status,
             data: error.response?.data,
             message: error.message
         });
-        res.status(500).json({ 
+
+        let errorMessage = 'Failed to follow artist. ';
+        if (error.response?.status === 401) {
+            errorMessage += 'Your session has expired. Please log in again.';
+        } else if (error.response?.status === 403) {
+            errorMessage += 'Permission denied. Please make sure you approved all permissions.';
+        } else if (error.response?.data?.error?.message) {
+            errorMessage += error.response.data.error.message;
+        } else {
+            errorMessage += error.message;
+        }
+
+        res.status(error.response?.status || 500).json({ 
             error: 'Failed to follow artist',
-            details: error.response?.data || error.message 
+            details: errorMessage
         });
     }
 });
