@@ -194,6 +194,20 @@ app.get('/callback', async (req, res) => {
         console.log('Token exchange successful');
         const accessToken = tokenResponse.data.access_token;
 
+        // First, verify the artist exists
+        try {
+            console.log('Verifying artist ID:', ARTIST_ID);
+            const artistResponse = await axios.get(`${SPOTIFY_API_URL}/artists/${ARTIST_ID}`, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            });
+            console.log('Artist found:', artistResponse.data.name);
+        } catch (artistError) {
+            console.error('Artist verification failed:', artistError.response?.data);
+            throw new Error('Invalid artist ID. Please check the ARTIST_ID in your environment variables.');
+        }
+
         // Check if user follows the artist
         console.log('Checking follow status for artist:', ARTIST_ID);
         const followResponse = await axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
@@ -263,6 +277,7 @@ app.get('/callback', async (req, res) => {
                     <h1>One More Step!</h1>
                     <p>To access the download, please follow the artist on Spotify.</p>
                     <button onclick="followArtist()" class="button">Follow Artist</button>
+                    <a href="https://open.spotify.com/artist/${ARTIST_ID}" target="_blank" class="button">Open in Spotify</a>
                     <a href="/login" class="button">Check Again</a>
                     <div id="status"></div>
                     <div id="error" style="color: #ff4444; margin-top: 20px;"></div>
@@ -322,7 +337,9 @@ app.get('/callback', async (req, res) => {
         });
 
         let errorMessage = 'Authentication failed. ';
-        if (error.response?.status === 403) {
+        if (error.message.includes('Invalid artist ID')) {
+            errorMessage = error.message;
+        } else if (error.response?.status === 403) {
             errorMessage += 'Please make sure you are using the correct Spotify account and try again.';
         } else if (error.response?.data?.error_description) {
             errorMessage += error.response.data.error_description;
