@@ -175,6 +175,8 @@ app.get('/callback', async (req, res) => {
     }
 
     try {
+        console.log('Attempting token exchange with code:', code.substring(0, 5) + '...');
+        
         // Exchange code for access token
         const tokenResponse = await axios.post(SPOTIFY_TOKEN_URL, 
             new URLSearchParams({
@@ -189,9 +191,11 @@ app.get('/callback', async (req, res) => {
             }
         );
 
+        console.log('Token exchange successful');
         const accessToken = tokenResponse.data.access_token;
 
         // Check if user follows the artist
+        console.log('Checking follow status for artist:', ARTIST_ID);
         const followResponse = await axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
             params: {
                 type: 'artist',
@@ -203,8 +207,10 @@ app.get('/callback', async (req, res) => {
         });
 
         const isFollowing = followResponse.data[0];
+        console.log('Follow status:', isFollowing);
 
         if (isFollowing) {
+            console.log('User follows artist, redirecting to:', SUCCESS_REDIRECT_URL);
             res.redirect(SUCCESS_REDIRECT_URL);
         } else {
             // Show follow page with error handling
@@ -262,16 +268,6 @@ app.get('/callback', async (req, res) => {
                     <div id="error" style="color: #ff4444; margin-top: 20px;"></div>
 
                     <script>
-                    // Add error handling for fetch
-                    function handleErrors(response) {
-                        if (!response.ok) {
-                            return response.json().then(err => {
-                                throw new Error(err.details || err.error || 'Network response was not ok');
-                            });
-                        }
-                        return response.json();
-                    }
-
                     async function followArtist() {
                         const status = document.getElementById('status');
                         const error = document.getElementById('error');
@@ -280,7 +276,11 @@ app.get('/callback', async (req, res) => {
                         
                         try {
                             const response = await fetch('/follow?access_token=${accessToken}');
-                            const data = await handleErrors(response);
+                            if (!response.ok) {
+                                const errorData = await response.json();
+                                throw new Error(errorData.details || errorData.error || 'Failed to follow artist');
+                            }
+                            const data = await response.json();
                             
                             if (data.success) {
                                 status.textContent = 'Successfully followed! Redirecting...';
@@ -295,6 +295,8 @@ app.get('/callback', async (req, res) => {
                             console.error('Follow error:', err);
                             status.textContent = '';
                             error.textContent = 'Error: ' + err.message;
+                            // Add retry button
+                            error.innerHTML += '<br><br><button onclick="followArtist()" class="button">Try Again</button>';
                         }
                     }
                     </script>
@@ -304,12 +306,31 @@ app.get('/callback', async (req, res) => {
         }
 
     } catch (error) {
-        console.error('Auth error:', {
+        console.error('Auth error details:', {
             status: error.response?.status,
+            statusText: error.response?.statusText,
             data: error.response?.data,
-            message: error.message
+            message: error.message,
+            config: {
+                url: error.config?.url,
+                method: error.config?.method,
+                headers: {
+                    ...error.config?.headers,
+                    Authorization: error.config?.headers?.Authorization ? '[REDACTED]' : undefined
+                }
+            }
         });
-        res.redirect('/?error=auth_error&details=' + encodeURIComponent(error.message));
+
+        let errorMessage = 'Authentication failed. ';
+        if (error.response?.status === 403) {
+            errorMessage += 'Please make sure you are using the correct Spotify account and try again.';
+        } else if (error.response?.data?.error_description) {
+            errorMessage += error.response.data.error_description;
+        } else {
+            errorMessage += error.message;
+        }
+
+        res.redirect('/?error=auth_error&details=' + encodeURIComponent(errorMessage));
     }
 });
 
