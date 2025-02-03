@@ -209,6 +209,13 @@ app.get('/callback', async (req, res) => {
     const storedState = req.cookies['spotify_auth_state'];
     const error = req.query.error;
 
+    console.log('Callback received:', {
+        hasCode: !!code,
+        hasState: !!state,
+        hasStoredState: !!storedState,
+        error: error || 'none'
+    });
+
     // Clear the state cookie
     res.clearCookie('spotify_auth_state');
 
@@ -226,6 +233,13 @@ app.get('/callback', async (req, res) => {
     }
 
     try {
+        console.log('Environment check:', {
+            hasClientId: !!CLIENT_ID,
+            hasClientSecret: !!CLIENT_SECRET,
+            redirectUri: REDIRECT_URI,
+            artistId: ARTIST_ID
+        });
+
         console.log('Attempting token exchange with code:', code.substring(0, 5) + '...');
         
         // Exchange code for access token
@@ -247,16 +261,31 @@ app.get('/callback', async (req, res) => {
 
         // First, verify the artist exists
         try {
-            console.log('Verifying artist ID:', ARTIST_ID);
+            console.log('Starting artist verification...');
+            console.log('Artist ID to verify:', ARTIST_ID);
+            console.log('Making request to:', `${SPOTIFY_API_URL}/artists/${ARTIST_ID}`);
+            
             const artistResponse = await axios.get(`${SPOTIFY_API_URL}/artists/${ARTIST_ID}`, {
                 headers: {
                     'Authorization': `Bearer ${accessToken}`
                 }
             });
-            console.log('Artist found:', artistResponse.data.name);
+            
+            console.log('Artist verification successful:', {
+                name: artistResponse.data.name,
+                id: artistResponse.data.id,
+                uri: artistResponse.data.uri
+            });
         } catch (artistError) {
-            console.error('Artist verification failed:', artistError.response?.data);
-            throw new Error('Invalid artist ID. Please check the ARTIST_ID in your environment variables.');
+            console.error('Artist verification failed:', {
+                status: artistError.response?.status,
+                statusText: artistError.response?.statusText,
+                data: artistError.response?.data,
+                message: artistError.message,
+                artistId: ARTIST_ID,
+                url: artistError.config?.url
+            });
+            throw new Error(`Invalid artist ID (${ARTIST_ID}). Please check the ARTIST_ID in your environment variables.`);
         }
 
         // Check if user follows the artist
