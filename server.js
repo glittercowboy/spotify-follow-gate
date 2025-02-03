@@ -105,13 +105,15 @@ app.get('/login', (req, res) => {
     const state = generateRandomString(16);
     res.cookie('spotify_auth_state', state);
 
-    const scope = 'user-follow-read user-follow-modify playlist-modify-public';
+    // Update scopes to include playlist-read-collaborative and playlist-read-private
+    const scope = 'user-follow-read user-follow-modify playlist-read-private playlist-read-collaborative';
     res.redirect(SPOTIFY_AUTH_URL +
         '?response_type=code' +
         '&client_id=' + CLIENT_ID +
         '&scope=' + encodeURIComponent(scope) +
         '&redirect_uri=' + encodeURIComponent(REDIRECT_URI) +
-        '&state=' + state
+        '&state=' + state +
+        '&show_dialog=true'  // Force showing the dialog to ensure proper permissions
     );
 });
 
@@ -126,6 +128,7 @@ app.get('/follow', async (req, res) => {
 
     try {
         // First verify we can get user info
+        console.log('Verifying user authentication...');
         const userResponse = await axios.get(`${SPOTIFY_API_URL}/me`, {
             headers: {
                 'Authorization': `Bearer ${access_token}`
@@ -133,36 +136,73 @@ app.get('/follow', async (req, res) => {
         });
         console.log('User authenticated:', userResponse.data.id);
 
+        // Verify we can access the playlist
+        console.log('Verifying playlist access...');
+        try {
+            const playlistResponse = await axios.get(`${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}`, {
+                headers: {
+                    'Authorization': `Bearer ${access_token}`
+                }
+            });
+            console.log('Playlist accessible:', playlistResponse.data.name);
+        } catch (playlistError) {
+            console.error('Playlist access error:', {
+                status: playlistError.response?.status,
+                data: playlistError.response?.data,
+                message: playlistError.message
+            });
+            throw new Error('Unable to access playlist. Please check the playlist ID and permissions.');
+        }
+
         // Follow both artist and playlist
         console.log('Attempting to follow artist and playlist...');
         
         // Follow artist
-        await axios({
-            method: 'put',
-            url: `${SPOTIFY_API_URL}/me/following`,
-            params: {
-                type: 'artist',
-                ids: ARTIST_ID
-            },
-            headers: {
-                'Authorization': `Bearer ${access_token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        console.log('Successfully followed artist');
+        try {
+            await axios({
+                method: 'put',
+                url: `${SPOTIFY_API_URL}/me/following`,
+                params: {
+                    type: 'artist',
+                    ids: ARTIST_ID
+                },
+                headers: {
+                    'Authorization': `Bearer ${access_token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            console.log('Successfully followed artist');
+        } catch (artistError) {
+            console.error('Artist follow error:', {
+                status: artistError.response?.status,
+                data: artistError.response?.data,
+                message: artistError.message
+            });
+            throw new Error('Failed to follow artist. ' + (artistError.response?.data?.error?.message || artistError.message));
+        }
 
         // Follow playlist
-        await axios({
-            method: 'put',
-            url: `${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}/followers`,
-            headers: {
-                'Authorization': `Bearer ${access_token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        console.log('Successfully followed playlist');
+        try {
+            await axios({
+                method: 'put',
+                url: `${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}/followers`,
+                headers: {
+                    'Authorization': `Bearer ${access_token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            console.log('Successfully followed playlist');
+        } catch (playlistError) {
+            console.error('Playlist follow error:', {
+                status: playlistError.response?.status,
+                data: playlistError.response?.data,
+                message: playlistError.message
+            });
+            throw new Error('Failed to follow playlist. ' + (playlistError.response?.data?.error?.message || playlistError.message));
+        }
 
         // Verify both follows
+        console.log('Verifying follows...');
         const [artistFollow, playlistFollow] = await Promise.all([
             // Check artist follow
             axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
@@ -185,11 +225,21 @@ app.get('/follow', async (req, res) => {
             })
         ]);
 
-        if (artistFollow.data[0] && playlistFollow.data[0]) {
+        const isFollowingArtist = artistFollow.data[0];
+        const isFollowingPlaylist = playlistFollow.data[0];
+        console.log('Follow verification status:', {
+            artist: isFollowingArtist,
+            playlist: isFollowingPlaylist
+        });
+
+        if (isFollowingArtist && isFollowingPlaylist) {
             console.log('Both follows verified successfully');
             res.json({ success: true });
         } else {
-            console.error('Follow verification failed');
+            console.error('Follow verification failed:', {
+                artistFollow: isFollowingArtist,
+                playlistFollow: isFollowingPlaylist
+            });
             res.status(500).json({ 
                 error: 'Failed to verify follows',
                 details: 'The follow requests succeeded but verification failed. Please try again.'
@@ -200,7 +250,8 @@ app.get('/follow', async (req, res) => {
             endpoint: error.config?.url,
             status: error.response?.status,
             data: error.response?.data,
-            message: error.message
+            message: error.message,
+            stack: error.stack
         });
 
         let errorMessage = 'Failed to follow. ';
