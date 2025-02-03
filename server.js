@@ -29,8 +29,16 @@ const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
 
 app.get('/', (req, res) => {
     const error = req.query.error;
-    const errorMessage = error === 'not_following' ? 
-        'Please follow the artist to access the download.' : '';
+    const details = req.query.details;
+    
+    let errorMessage = '';
+    if (error === 'spotify_access_denied') {
+        errorMessage = 'You need to approve the permissions to continue.';
+    } else if (error === 'state_mismatch') {
+        errorMessage = 'Security verification failed. Please try again.';
+    } else if (error === 'auth_error') {
+        errorMessage = 'Authentication error. Please try again. ' + (details || '');
+    }
     
     res.send(`
         <!DOCTYPE html>
@@ -86,7 +94,13 @@ app.get('/login', (req, res) => {
     const scope = 'user-follow-read user-follow-modify';
     const state = Math.random().toString(36).substring(7);
     
-    res.cookie('spotify_auth_state', state);
+    // Set cookie with proper options
+    res.cookie('spotify_auth_state', state, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 3600000 // 1 hour
+    });
     
     const params = new URLSearchParams({
         response_type: 'code',
@@ -94,7 +108,7 @@ app.get('/login', (req, res) => {
         scope: scope,
         redirect_uri: REDIRECT_URI,
         state: state,
-        show_dialog: true // This ensures the user sees the permission screen
+        show_dialog: false // Changed to false to prevent endless loop
     });
 
     res.redirect(`${SPOTIFY_AUTH_URL}?${params.toString()}`);
@@ -142,8 +156,20 @@ app.get('/callback', async (req, res) => {
     const code = req.query.code;
     const state = req.query.state;
     const storedState = req.cookies['spotify_auth_state'];
+    const error = req.query.error;
 
-    if (state === null || state !== storedState) {
+    // Clear the state cookie
+    res.clearCookie('spotify_auth_state');
+
+    // Handle Spotify errors
+    if (error) {
+        console.error('Spotify auth error:', error);
+        res.redirect(`/?error=spotify_${error}`);
+        return;
+    }
+
+    if (!state || !storedState || state !== storedState) {
+        console.error('State mismatch:', { state, storedState });
         res.redirect('/?error=state_mismatch');
         return;
     }
@@ -181,7 +207,7 @@ app.get('/callback', async (req, res) => {
         if (isFollowing) {
             res.redirect(SUCCESS_REDIRECT_URL);
         } else {
-            // Show follow page
+            // Show follow page with error handling
             res.send(`
                 <!DOCTYPE html>
                 <html>
@@ -233,28 +259,42 @@ app.get('/callback', async (req, res) => {
                     <button onclick="followArtist()" class="button">Follow Artist</button>
                     <a href="/login" class="button">Check Again</a>
                     <div id="status"></div>
+                    <div id="error" style="color: #ff4444; margin-top: 20px;"></div>
 
                     <script>
+                    // Add error handling for fetch
+                    function handleErrors(response) {
+                        if (!response.ok) {
+                            return response.json().then(err => {
+                                throw new Error(err.details || err.error || 'Network response was not ok');
+                            });
+                        }
+                        return response.json();
+                    }
+
                     async function followArtist() {
                         const status = document.getElementById('status');
+                        const error = document.getElementById('error');
                         status.textContent = 'Following artist...';
+                        error.textContent = '';
                         
                         try {
                             const response = await fetch('/follow?access_token=${accessToken}');
-                            const data = await response.json();
+                            const data = await handleErrors(response);
                             
                             if (data.success) {
                                 status.textContent = 'Successfully followed! Redirecting...';
+                                error.textContent = '';
                                 setTimeout(() => {
                                     window.location.href = '/login';
                                 }, 1500);
                             } else {
-                                console.error('Follow failed:', data);
-                                status.textContent = 'Failed to follow. Please try again. ' + (data.details || '');
+                                throw new Error(data.error || 'Failed to follow');
                             }
-                        } catch (error) {
-                            console.error('Follow error:', error);
-                            status.textContent = 'An error occurred. Please try again.';
+                        } catch (err) {
+                            console.error('Follow error:', err);
+                            status.textContent = '';
+                            error.textContent = 'Error: ' + err.message;
                         }
                     }
                     </script>
@@ -264,8 +304,12 @@ app.get('/callback', async (req, res) => {
         }
 
     } catch (error) {
-        console.error('Error:', error.response ? error.response.data : error.message);
-        res.redirect('/?error=auth_error');
+        console.error('Auth error:', {
+            status: error.response?.status,
+            data: error.response?.data,
+            message: error.message
+        });
+        res.redirect('/?error=auth_error&details=' + encodeURIComponent(error.message));
     }
 });
 
