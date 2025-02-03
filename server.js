@@ -4,7 +4,7 @@ const axios = require('axios');
 const cookieParser = require('cookie-parser');
 
 // Validate required environment variables
-const requiredEnvVars = ['CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'ARTIST_ID', 'SUCCESS_REDIRECT_URL', 'FAILURE_REDIRECT_URL'];
+const requiredEnvVars = ['CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'ARTIST_ID', 'PLAYLIST_ID', 'SUCCESS_REDIRECT_URL', 'FAILURE_REDIRECT_URL'];
 const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
 
 if (missingEnvVars.length > 0) {
@@ -19,6 +19,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const ARTIST_ID = process.env.ARTIST_ID;
+const PLAYLIST_ID = process.env.PLAYLIST_ID || '22UjtzmKbo9WLSLqfvx2PR';
 const SUCCESS_REDIRECT_URL = process.env.SUCCESS_REDIRECT_URL;
 const FAILURE_REDIRECT_URL = process.env.FAILURE_REDIRECT_URL;
 
@@ -26,6 +27,16 @@ const FAILURE_REDIRECT_URL = process.env.FAILURE_REDIRECT_URL;
 const SPOTIFY_AUTH_URL = 'https://accounts.spotify.com/authorize';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
+
+// Generate a random string for state
+function generateRandomString(length) {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < length; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+}
 
 app.get('/', (req, res) => {
     const error = req.query.error;
@@ -91,27 +102,17 @@ app.get('/', (req, res) => {
 });
 
 app.get('/login', (req, res) => {
-    const scope = 'user-follow-read user-follow-modify';
-    const state = Math.random().toString(36).substring(7);
-    
-    // Set cookie with proper options
-    res.cookie('spotify_auth_state', state, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'lax',
-        maxAge: 3600000 // 1 hour
-    });
-    
-    const params = new URLSearchParams({
-        response_type: 'code',
-        client_id: CLIENT_ID,
-        scope: scope,
-        redirect_uri: REDIRECT_URI,
-        state: state,
-        show_dialog: false // Changed to false to prevent endless loop
-    });
+    const state = generateRandomString(16);
+    res.cookie('spotify_auth_state', state);
 
-    res.redirect(`${SPOTIFY_AUTH_URL}?${params.toString()}`);
+    const scope = 'user-follow-read user-follow-modify playlist-modify-public';
+    res.redirect(SPOTIFY_AUTH_URL +
+        '?response_type=code' +
+        '&client_id=' + CLIENT_ID +
+        '&scope=' + encodeURIComponent(scope) +
+        '&redirect_uri=' + encodeURIComponent(REDIRECT_URI) +
+        '&state=' + state
+    );
 });
 
 app.get('/follow', async (req, res) => {
@@ -132,16 +133,10 @@ app.get('/follow', async (req, res) => {
         });
         console.log('User authenticated:', userResponse.data.id);
 
-        // Then verify artist exists
-        const artistResponse = await axios.get(`${SPOTIFY_API_URL}/artists/${ARTIST_ID}`, {
-            headers: {
-                'Authorization': `Bearer ${access_token}`
-            }
-        });
-        console.log('Artist found:', artistResponse.data.name);
-
-        // Follow the artist
-        console.log('Attempting to follow artist...');
+        // Follow both artist and playlist
+        console.log('Attempting to follow artist and playlist...');
+        
+        // Follow artist
         await axios({
             method: 'put',
             url: `${SPOTIFY_API_URL}/me/following`,
@@ -156,25 +151,48 @@ app.get('/follow', async (req, res) => {
         });
         console.log('Successfully followed artist');
 
-        // Verify the follow was successful
-        const verifyFollow = await axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
-            params: {
-                type: 'artist',
-                ids: ARTIST_ID
-            },
+        // Follow playlist
+        await axios({
+            method: 'put',
+            url: `${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}/followers`,
             headers: {
-                'Authorization': `Bearer ${access_token}`
+                'Authorization': `Bearer ${access_token}`,
+                'Content-Type': 'application/json'
             }
         });
+        console.log('Successfully followed playlist');
 
-        if (verifyFollow.data[0]) {
-            console.log('Follow verified successfully');
+        // Verify both follows
+        const [artistFollow, playlistFollow] = await Promise.all([
+            // Check artist follow
+            axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
+                params: {
+                    type: 'artist',
+                    ids: ARTIST_ID
+                },
+                headers: {
+                    'Authorization': `Bearer ${access_token}`
+                }
+            }),
+            // Check playlist follow
+            axios.get(`${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}/followers/contains`, {
+                params: {
+                    ids: userResponse.data.id
+                },
+                headers: {
+                    'Authorization': `Bearer ${access_token}`
+                }
+            })
+        ]);
+
+        if (artistFollow.data[0] && playlistFollow.data[0]) {
+            console.log('Both follows verified successfully');
             res.json({ success: true });
         } else {
-            console.error('Follow appeared to succeed but verification failed');
+            console.error('Follow verification failed');
             res.status(500).json({ 
-                error: 'Failed to verify follow',
-                details: 'The follow request succeeded but verification failed. Please try again or follow manually.'
+                error: 'Failed to verify follows',
+                details: 'The follow requests succeeded but verification failed. Please try again.'
             });
         }
     } catch (error) {
@@ -185,7 +203,7 @@ app.get('/follow', async (req, res) => {
             message: error.message
         });
 
-        let errorMessage = 'Failed to follow artist. ';
+        let errorMessage = 'Failed to follow. ';
         if (error.response?.status === 401) {
             errorMessage += 'Your session has expired. Please log in again.';
         } else if (error.response?.status === 403) {
@@ -197,7 +215,7 @@ app.get('/follow', async (req, res) => {
         }
 
         res.status(error.response?.status || 500).json({ 
-            error: 'Failed to follow artist',
+            error: 'Failed to follow',
             details: errorMessage
         });
     }
@@ -237,7 +255,8 @@ app.get('/callback', async (req, res) => {
             hasClientId: !!CLIENT_ID,
             hasClientSecret: !!CLIENT_SECRET,
             redirectUri: REDIRECT_URI,
-            artistId: ARTIST_ID
+            artistId: ARTIST_ID,
+            playlistId: PLAYLIST_ID
         });
 
         console.log('Attempting token exchange with code:', code.substring(0, 5) + '...');
@@ -290,27 +309,46 @@ app.get('/callback', async (req, res) => {
             throw new Error(`Invalid artist ID (${ARTIST_ID}). Please check the ARTIST_ID in your environment variables.`);
         }
 
-        // Check if user follows the artist
-        console.log('Checking follow status for artist:', ARTIST_ID);
-        const followResponse = await axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
-            params: {
-                type: 'artist',
-                ids: ARTIST_ID
-            },
-            headers: {
-                'Authorization': `Bearer ${accessToken}`
-            }
-        });
+        // Check if user follows both artist and playlist
+        console.log('Checking follow status...');
+        const [artistFollow, playlistFollow] = await Promise.all([
+            // Check artist follow
+            axios.get(`${SPOTIFY_API_URL}/me/following/contains`, {
+                params: {
+                    type: 'artist',
+                    ids: ARTIST_ID
+                },
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            }),
+            // Check playlist follow
+            axios.get(`${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}/followers/contains`, {
+                params: {
+                    ids: artistInfo.id
+                },
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            })
+        ]);
 
-        const isFollowing = followResponse.data[0];
-        console.log('Follow status:', isFollowing);
+        const isFollowingArtist = artistFollow.data[0];
+        const isFollowingPlaylist = playlistFollow.data[0];
+        console.log('Follow status:', { artist: isFollowingArtist, playlist: isFollowingPlaylist });
 
-        if (isFollowing) {
-            console.log('User follows artist, redirecting to:', SUCCESS_REDIRECT_URL);
+        if (isFollowingArtist && isFollowingPlaylist) {
+            console.log('User follows both, redirecting to:', SUCCESS_REDIRECT_URL);
             res.redirect(SUCCESS_REDIRECT_URL);
         } else {
-            // Get artist image URL
+            // Get artist image URL and playlist info
             const artistImage = artistInfo.images[0]?.url || '';
+            const playlistResponse = await axios.get(`${SPOTIFY_API_URL}/playlists/${PLAYLIST_ID}`, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            });
+            const playlistName = playlistResponse.data.name;
             
             // Show follow page with improved design
             res.send(`
@@ -398,24 +436,24 @@ app.get('/callback', async (req, res) => {
                     <div class="container">
                         <img src="${artistImage}" alt="${artistInfo.name}" class="artist-image">
                         <h1>ONE MORE STEP...</h1>
-                        <p>Follow ${artistInfo.name} on Spotify to access your free download</p>
-                        <button onclick="followArtist()" class="button">Follow Artist</button>
+                        <p>Follow ${artistInfo.name} and their playlist "${playlistName}" on Spotify to access your free download</p>
+                        <button onclick="followBoth()" class="button">Follow Now</button>
                         <div id="status"></div>
                         <div id="error"></div>
                     </div>
 
                     <script>
-                    async function followArtist() {
+                    async function followBoth() {
                         const status = document.getElementById('status');
                         const error = document.getElementById('error');
-                        status.textContent = 'Following artist...';
+                        status.textContent = 'Following...';
                         error.textContent = '';
                         
                         try {
                             const response = await fetch('/follow?access_token=${accessToken}');
                             if (!response.ok) {
                                 const errorData = await response.json();
-                                throw new Error(errorData.details || errorData.error || 'Failed to follow artist');
+                                throw new Error(errorData.details || errorData.error || 'Failed to follow');
                             }
                             const data = await response.json();
                             
