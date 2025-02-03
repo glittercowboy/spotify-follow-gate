@@ -307,60 +307,93 @@ app.get('/callback', async (req, res) => {
             console.log('User follows artist, redirecting to:', SUCCESS_REDIRECT_URL);
             res.redirect(SUCCESS_REDIRECT_URL);
         } else {
-            // Show follow page with error handling
+            // Get artist info for the page
+            const artistInfo = artistResponse.data;
+            const artistImage = artistInfo.images[0]?.url || '';
+            
+            // Show follow page with improved design
             res.send(`
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Follow to Continue</title>
+                    <title>Follow ${artistInfo.name} on Spotify</title>
+                    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
                     <style>
                         body {
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                            max-width: 600px;
-                            margin: 40px auto;
-                            padding: 20px;
-                            text-align: center;
-                            background: #121212;
+                            margin: 0;
+                            padding: 0;
+                            min-height: 100vh;
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                            justify-content: center;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+                            background: linear-gradient(135deg, #1DB954 0%, #191414 100%);
                             color: white;
+                            text-align: center;
+                        }
+                        .container {
+                            padding: 2rem;
+                            max-width: 600px;
+                            width: 90%;
                         }
                         h1 {
-                            color: #1DB954;
-                            margin-bottom: 30px;
+                            font-family: 'Poppins', sans-serif;
+                            font-weight: 600;
+                            font-size: 2.5rem;
+                            margin-bottom: 1.5rem;
+                            color: white;
+                        }
+                        p {
+                            font-size: 1.2rem;
+                            margin-bottom: 2rem;
+                            color: rgba(255, 255, 255, 0.9);
+                        }
+                        .artist-image {
+                            width: 250px;
+                            height: 250px;
+                            margin-bottom: 2rem;
+                            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
                         }
                         .button {
-                            display: inline-block;
                             background: #1DB954;
                             color: white;
-                            padding: 15px 30px;
-                            border-radius: 25px;
-                            text-decoration: none;
-                            font-weight: bold;
-                            transition: background 0.3s;
                             border: none;
+                            padding: 1rem 2rem;
+                            font-size: 1.1rem;
+                            font-weight: 600;
                             cursor: pointer;
-                            margin: 10px;
+                            text-decoration: none;
+                            display: inline-block;
+                            transition: transform 0.2s, background-color 0.2s;
+                            text-transform: uppercase;
+                            letter-spacing: 1px;
                         }
                         .button:hover {
                             background: #1ed760;
-                        }
-                        .message {
-                            margin: 20px 0;
-                            padding: 10px;
+                            transform: translateY(-2px);
                         }
                         #status {
-                            margin-top: 20px;
-                            font-weight: bold;
+                            margin-top: 1.5rem;
+                            font-weight: 500;
+                            color: white;
+                        }
+                        #error {
+                            margin-top: 1rem;
+                            color: #ff4444;
+                            font-weight: 500;
                         }
                     </style>
                 </head>
                 <body>
-                    <h1>One More Step!</h1>
-                    <p>To access the download, please follow the artist on Spotify.</p>
-                    <button onclick="followArtist()" class="button">Follow Artist</button>
-                    <a href="https://open.spotify.com/artist/${ARTIST_ID}" target="_blank" class="button">Open in Spotify</a>
-                    <a href="/login" class="button">Check Again</a>
-                    <div id="status"></div>
-                    <div id="error" style="color: #ff4444; margin-top: 20px;"></div>
+                    <div class="container">
+                        <img src="${artistImage}" alt="${artistInfo.name}" class="artist-image">
+                        <h1>Follow ${artistInfo.name}</h1>
+                        <p>Follow to access exclusive content</p>
+                        <button onclick="followArtist()" class="button">Follow Artist</button>
+                        <div id="status"></div>
+                        <div id="error"></div>
+                    </div>
 
                     <script>
                     async function followArtist() {
@@ -381,7 +414,7 @@ app.get('/callback', async (req, res) => {
                                 status.textContent = 'Successfully followed! Redirecting...';
                                 error.textContent = '';
                                 setTimeout(() => {
-                                    window.location.href = '/login';
+                                    window.location.href = '${SUCCESS_REDIRECT_URL}';
                                 }, 1500);
                             } else {
                                 throw new Error(data.error || 'Failed to follow');
@@ -390,8 +423,6 @@ app.get('/callback', async (req, res) => {
                             console.error('Follow error:', err);
                             status.textContent = '';
                             error.textContent = 'Error: ' + err.message;
-                            // Add retry button
-                            error.innerHTML += '<br><br><button onclick="followArtist()" class="button">Try Again</button>';
                         }
                     }
                     </script>
