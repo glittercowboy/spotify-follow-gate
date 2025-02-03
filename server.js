@@ -259,7 +259,8 @@ app.get('/callback', async (req, res) => {
         console.log('Token exchange successful');
         const accessToken = tokenResponse.data.access_token;
 
-        // First, verify the artist exists
+        // First, verify the artist exists and get artist info
+        let artistInfo;
         try {
             console.log('Starting artist verification...');
             console.log('Artist ID to verify:', ARTIST_ID);
@@ -271,10 +272,11 @@ app.get('/callback', async (req, res) => {
                 }
             });
             
+            artistInfo = artistResponse.data;
             console.log('Artist verification successful:', {
-                name: artistResponse.data.name,
-                id: artistResponse.data.id,
-                uri: artistResponse.data.uri
+                name: artistInfo.name,
+                id: artistInfo.id,
+                uri: artistInfo.uri
             });
         } catch (artistError) {
             console.error('Artist verification failed:', {
@@ -307,8 +309,7 @@ app.get('/callback', async (req, res) => {
             console.log('User follows artist, redirecting to:', SUCCESS_REDIRECT_URL);
             res.redirect(SUCCESS_REDIRECT_URL);
         } else {
-            // Get artist info for the page
-            const artistInfo = artistResponse.data;
+            // Get artist image URL
             const artistImage = artistInfo.images[0]?.url || '';
             
             // Show follow page with improved design
